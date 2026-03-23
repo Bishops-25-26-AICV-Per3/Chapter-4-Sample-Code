@@ -19,7 +19,7 @@ import pickle
 import tensorflow as tf
 import numpy as np
 
-BATCH_SIZE = 1024
+BATCH_SIZE = 64
 VALIDATION_SPLIT = 0.3
 # Set this to some integer to limit the size of the vocabulary, or None
 #   to use every word that is found.
@@ -29,6 +29,9 @@ SEQUENCE_LENGTH = 100
 # Number of dimensions to capture the meaning of each word.  
 #   word2vec used 300 dimensions.
 EMBEDDING_DIM = 256
+EPOCHS = 10
+
+tf.keras.utils.set_random_seed(37)
 
 def get_datasets() -> (tf.data.Dataset, tf.data.Dataset):
     train, valid = tf.keras.utils.text_dataset_from_directory(
@@ -44,6 +47,9 @@ def get_datasets() -> (tf.data.Dataset, tf.data.Dataset):
 
 def clean_text(input_data):
     # Convert all to lower case
+    input_data = tf.strings.lower(input_data)
+    # Replace all HTML newline tags with spaces
+    input_data = tf.strings.regex_replace(input_data, '<br />', ' ')
     # Get rid of everything that isn't a letter, a space or an apostrophe
     input_data = tf.strings.regex_replace(input_data, "[^a-z' ]", '')
     return input_data
@@ -64,7 +70,9 @@ def get_model(vectorize_layer: tf.keras.layers.Layer) -> tf.keras.Model:
         [
             vectorize_layer,
             tf.keras.layers.Embedding(VOCAB_SIZE, EMBEDDING_DIM, name='embedding'),
+            tf.keras.layers.Dropout(0.4),
             tf.keras.layers.GlobalAveragePooling1D(),
+            tf.keras.layers.Dropout(0.4),
             tf.keras.layers.Dense(256, activation='relu'),
             tf.keras.layers.Dense(64, activation='relu'),
             tf.keras.layers.Dense(16, activation='relu'),
@@ -72,9 +80,14 @@ def get_model(vectorize_layer: tf.keras.layers.Layer) -> tf.keras.Model:
             tf.keras.layers.Dense(1),
         ]
     )
-
+    lr_sch = tf.keras.optimizers.schedules.ExponentialDecay(
+        initial_learning_rate=1e-3,
+        decay_steps=547,
+        decay_rate=0.95,
+        staircase=False,
+    )
     model.compile(
-        optimizer = tf.keras.optimizers.Adam(learning_rate=10**(-3)),
+        optimizer = tf.keras.optimizers.Adam(learning_rate=lr_sch),
         loss = tf.keras.losses.BinaryCrossentropy(from_logits=True),
         metrics=['accuracy'],
     )
@@ -110,7 +123,7 @@ def main():
     history = model.fit(
         train,
         validation_data = valid,
-        epochs = 3,
+        epochs = EPOCHS,
     )
 
     weights = model.get_layer('embedding').get_weights()[0]
